@@ -1,4 +1,5 @@
 import { ImageResponse } from "next/og";
+import { LiftLogIcon } from "@/app/icons/shared";
 
 export const contentType = "image/png";
 export const sizes = {
@@ -7,47 +8,19 @@ export const sizes = {
 
 export default function Icon() {
   return new ImageResponse(
-    (
-      <div
-        style={{
-          display: "flex",
-          height: "100%",
-          width: "100%",
-          alignItems: "center",
-          justifyContent: "center",
-          background:
-            "radial-gradient(circle at 30% 20%, #2b1c1a 0%, #121926 45%, #0b1018 100%)"
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            height: 360,
-            width: 360,
-            borderRadius: 96,
-            alignItems: "center",
-            justifyContent: "center",
-            background: "linear-gradient(160deg, #ff5a1f 0%, #ff3c00 58%, #cf2d00 100%)",
-            boxShadow: "0 30px 100px rgba(255,60,0,0.34)"
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#ffffff",
-              fontSize: 180,
-              fontWeight: 800,
-              letterSpacing: -10,
-              fontFamily: "Arial"
-            }}
-          >
-            LL
-          </div>
-        </div>
-      </div>
-    ),
+    <LiftLogIcon
+      canvasSize={512}
+      badgeSize={360}
+      badgeRadius={96}
+      plateWidth={34}
+      plateHeight={88}
+      plateRadius={14}
+      barWidth={126}
+      barHeight={20}
+      innerGap={26}
+      glowBlur={100}
+      shadowY={30}
+    />,
     {
       width: 512,
       height: 512
