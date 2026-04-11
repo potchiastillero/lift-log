@@ -116,6 +116,10 @@ function buildCalendarDays(month: Date) {
   return cells;
 }
 
+function isSameMonth(date: Date, month: Date) {
+  return date.getMonth() === month.getMonth() && date.getFullYear() === month.getFullYear();
+}
+
 function ViewButton({
   active,
   children,
@@ -526,10 +530,10 @@ export function LiftLogApp() {
         >
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+              <p className="text-[0.76rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
                 Calendar
               </p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em]">{getMonthLabel(calendarMonth)}</h2>
+              <h2 className="mt-2 text-[2rem] font-semibold tracking-[-0.05em] sm:text-2xl">{getMonthLabel(calendarMonth)}</h2>
             </div>
             <div className="flex gap-2">
               <button
@@ -551,11 +555,11 @@ export function LiftLogApp() {
             </div>
           </div>
 
-          <div className="mt-5 grid grid-cols-7 gap-2">
+          <div className="mt-5 hidden grid-cols-7 gap-2 sm:grid">
             {WEEK_DAYS.map((day) => (
               <div
                 key={day}
-                className="rounded-full px-2 py-2 text-center text-[0.7rem] font-semibold uppercase tracking-[0.18em]"
+                className="rounded-full px-2 py-2 text-center text-[0.76rem] font-semibold uppercase tracking-[0.18em]"
                 style={{ color: "var(--app-text-muted)" }}
               >
                 {day}
@@ -587,7 +591,7 @@ export function LiftLogApp() {
                     <span className="text-sm font-semibold">{date.getDate()}</span>
                     {isToday ? (
                       <span
-                        className="rounded-full px-2 py-0.5 text-[0.6rem] font-semibold uppercase tracking-[0.18em]"
+                        className="rounded-full px-2 py-0.5 text-[0.68rem] font-semibold uppercase tracking-[0.18em]"
                         style={{ background: "var(--app-accent)", color: "#ffffff" }}
                       >
                         Today
@@ -598,12 +602,12 @@ export function LiftLogApp() {
                     {logCount > 0 ? (
                       <>
                         <span className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--app-accent)" }} />
-                        <span className="text-xs font-medium" style={{ color: "var(--app-text-soft)" }}>
+                        <span className="text-[0.8rem] font-medium" style={{ color: "var(--app-text-soft)" }}>
                           {logCount} {logCount === 1 ? "log" : "logs"}
                         </span>
                       </>
                     ) : (
-                      <span className="text-xs" style={{ color: "var(--app-text-muted)" }}>
+                      <span className="text-[0.8rem]" style={{ color: "var(--app-text-muted)" }}>
                         No logs
                       </span>
                     )}
@@ -611,6 +615,64 @@ export function LiftLogApp() {
                 </button>
               );
             })}
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-3 sm:hidden">
+            {calendarDays
+              .filter((date) => isSameMonth(date, calendarMonth))
+              .map((date) => {
+                const dateKey = getDateKey(date);
+                const logCount = logsByDate[dateKey]?.length ?? 0;
+                const isSelected = selectedCalendarDate === dateKey;
+                const isToday = dateKey === today;
+                const weekday = WEEK_DAYS[date.getDay()];
+
+                return (
+                  <button
+                    key={dateKey}
+                    type="button"
+                    onClick={() => setSelectedCalendarDate(dateKey)}
+                    className="min-h-[108px] rounded-[22px] border px-3 py-3 text-left transition"
+                    style={{
+                      borderColor: isSelected ? "var(--app-accent)" : "var(--app-border)",
+                      background: isSelected ? "var(--app-accent-soft)" : "var(--app-panel-muted)",
+                      boxShadow: isSelected ? "0 12px 30px var(--app-accent-glow)" : "none"
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-[0.76rem] font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--app-text-muted)" }}>
+                          {weekday}
+                        </p>
+                        <p className="mt-1 text-[1.35rem] font-semibold">{date.getDate()}</p>
+                      </div>
+                      {isToday ? (
+                        <span
+                          className="rounded-full px-2 py-1 text-[0.68rem] font-semibold uppercase tracking-[0.18em]"
+                          style={{ background: "var(--app-accent)", color: "#ffffff" }}
+                        >
+                          Today
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-5 flex items-center gap-2">
+                      {logCount > 0 ? (
+                        <>
+                          <span className="h-2.5 w-2.5 rounded-full" style={{ background: "var(--app-accent)" }} />
+                          <span className="text-[0.95rem] font-medium" style={{ color: "var(--app-text-soft)" }}>
+                            {logCount} {logCount === 1 ? "log" : "logs"}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-[0.95rem]" style={{ color: "var(--app-text-muted)" }}>
+                          No logs
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
           </div>
         </section>
 
@@ -620,12 +682,12 @@ export function LiftLogApp() {
         >
           <div className="flex items-center gap-2">
             <CalendarDays className="h-4 w-4" style={{ color: "var(--app-accent)" }} />
-            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+            <p className="text-[0.76rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
               Selected Day
             </p>
           </div>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em]">{formatWorkoutDateLabel(selectedCalendarDate, today)}</h2>
-          <p className="mt-2 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+          <h2 className="mt-2 text-[1.95rem] font-semibold tracking-[-0.05em] sm:text-2xl">{formatWorkoutDateLabel(selectedCalendarDate, today)}</h2>
+          <p className="mt-2 text-[0.98rem] leading-7 sm:text-sm sm:leading-6" style={{ color: "var(--app-text-soft)" }}>
             Tap any workout day to jump through your training week-by-week without scrolling through the full app.
           </p>
 
@@ -641,8 +703,8 @@ export function LiftLogApp() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-base font-semibold">{log.templateName}</p>
-                      <p className="mt-1 text-sm" style={{ color: "var(--app-text-soft)" }}>
+                      <p className="text-[1.02rem] font-semibold sm:text-base">{log.templateName}</p>
+                      <p className="mt-1 text-[0.98rem] sm:text-sm" style={{ color: "var(--app-text-soft)" }}>
                         {getLoggedSetCount(log)} sets · {getExerciseCountLabel(log)}
                       </p>
                     </div>
@@ -652,7 +714,7 @@ export function LiftLogApp() {
               ))
             ) : (
               <div
-                className="rounded-[24px] border border-dashed px-4 py-5 text-sm leading-6"
+                className="rounded-[24px] border border-dashed px-4 py-5 text-[0.98rem] leading-7 sm:text-sm sm:leading-6"
                 style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
               >
                 No workouts logged on this day yet.
@@ -1099,10 +1161,10 @@ export function LiftLogApp() {
                 Lift Log
               </div>
               <h1 className="mt-4 text-[2.3rem] font-semibold tracking-[-0.07em] sm:text-[3.6rem]">Fast enough to use between sets.</h1>
-              <p className="mt-3 max-w-xl text-sm leading-6 sm:text-base" style={{ color: "var(--app-text-soft)" }}>
-                The app now works more like a lightweight multi-screen product: focused sections, less vertical wandering, and a
-                calendar you can actually use.
-              </p>
+          <p className="mt-3 max-w-xl text-[0.98rem] leading-7 sm:text-base sm:leading-6" style={{ color: "var(--app-text-soft)" }}>
+            The app now works more like a lightweight multi-screen product: focused sections, less vertical wandering, and a
+            calendar you can actually use.
+          </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-4 lg:min-w-[560px]">
