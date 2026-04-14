@@ -12,9 +12,12 @@ export function RegisterServiceWorker() {
       return;
     }
 
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      // Registration failure should not block the workout flow.
-    });
+    navigator.serviceWorker
+      .register("/sw.js")
+      .then((registration) => registration.update())
+      .catch(() => {
+        // Registration failure should not block the workout flow.
+      });
   }, []);
 
   return null;

@@ -1,4 +1,4 @@
-const CACHE_NAME = "lift-log-shell-v1";
+const CACHE_NAME = "lift-log-shell-v2";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/apple-icon", "/icons/192", "/icons/512", "/icons/apple"];
 
 self.addEventListener("install", (event) => {
@@ -24,11 +24,25 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  const url = new URL(event.request.url);
+  const isSameOrigin = url.origin === self.location.origin;
+  const isShellAsset = isSameOrigin && APP_SHELL.includes(url.pathname);
+
   if (event.request.mode === "navigate") {
     event.respondWith(
       fetch(event.request).catch(async () => {
         const cache = await caches.open(CACHE_NAME);
         return cache.match("/") || Response.error();
+      })
+    );
+    return;
+  }
+
+  if (!isShellAsset) {
+    event.respondWith(
+      fetch(event.request).catch(async () => {
+        const cachedResponse = await caches.match(event.request);
+        return cachedResponse || Response.error();
       })
     );
     return;
