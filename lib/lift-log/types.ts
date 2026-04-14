@@ -36,7 +36,8 @@ export type WorkoutLog = {
 };
 
 export type LiftStore = {
-  version: 5;
+  version: 6;
+  updatedAt: string;
   exerciseLibrary: string[];
   templates: WorkoutTemplate[];
   logs: WorkoutLog[];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BarChart3,
   CalendarDays,
@@ -8,8 +8,13 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Cloud,
+  CloudOff,
   Dumbbell,
   History,
+  LoaderCircle,
+  LogIn,
+  LogOut,
   Moon,
   NotebookPen,
   PencilLine,
@@ -33,13 +38,24 @@ import {
   getPreviousExerciseReference,
   getWorkoutCompletion,
   logWorkoutSet,
+  mergeLiftStores,
   readLiftStore,
   removeWorkoutExercise,
   renameWorkoutExercise,
+  replaceLiftStore,
   startWorkout,
   updateExerciseNote,
   upsertTemplate
 } from "@/lib/lift-log/store";
+import {
+  getLiftLogSyncUser,
+  isLiftLogSyncAvailable,
+  readLiftLogCloudStore,
+  sendLiftLogMagicLink,
+  signOutLiftLogSync,
+  subscribeToLiftLogAuth,
+  writeLiftLogCloudStore
+} from "@/lib/lift-log/sync";
 import type { LiftStore, WorkoutLog, WorkoutTemplate } from "@/lib/lift-log/types";
 
 type DraftSet = {
@@ -54,6 +70,7 @@ type TemplateEditorState = {
 };
 
 type AppView = "today" | "templates" | "calendar" | "logs";
+type SyncStatus = "local" | "checking" | "syncing" | "synced" | "error";
 
 const WEIGHT_STEPS = [-5, -2.5, 2.5, 5];
 const REP_STEPS = [-1, 1];
@@ -153,7 +170,7 @@ function ViewButton({
 }
 
 export function LiftLogApp() {
-  const [store, setStore] = useState<LiftStore>({ version: 5, exerciseLibrary: [], templates: [], logs: [] });
+  const [store, setStore] = useState<LiftStore>({ version: 6, updatedAt: new Date(0).toISOString(), exerciseLibrary: [], templates: [], logs: [] });
   const [drafts, setDrafts] = useState<Record<string, DraftSet>>({});
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [templateEditor, setTemplateEditor] = useState<TemplateEditorState | null>(null);
@@ -168,6 +185,18 @@ export function LiftLogApp() {
   const [justLoggedExerciseId, setJustLoggedExerciseId] = useState("");
   const [exerciseNameDrafts, setExerciseNameDrafts] = useState<Record<string, string>>({});
   const [newExerciseName, setNewExerciseName] = useState("");
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const [syncEmail, setSyncEmail] = useState("");
+  const [syncUserEmail, setSyncUserEmail] = useState("");
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
+  const [syncUserId, setSyncUserId] = useState("");
+  const syncAvailable = isLiftLogSyncAvailable();
+  const storeRef = useRef(store);
+  const lastSyncedStoreRef = useRef("");
+  const didRunInitialSyncRef = useRef(false);
+  const pushTimerRef = useRef<number | null>(null);
 
   const today = formatTodayDate(now);
   const activeWorkout = getActiveWorkout(store, today);
@@ -184,11 +213,147 @@ export function LiftLogApp() {
   }, [recentLogs]);
   const selectedDateLogs = logsByDate[selectedCalendarDate] ?? [];
   const calendarDays = useMemo(() => buildCalendarDays(calendarMonth), [calendarMonth]);
+  const storeSignature = useMemo(() => JSON.stringify(store), [store]);
+
+  useEffect(() => {
+    storeRef.current = store;
+  }, [store]);
 
   useEffect(() => {
     const nextStore = readLiftStore();
     setStore(nextStore);
+    setHasHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!syncAvailable) {
+      setSyncStatus("local");
+      return;
+    }
+
+    let active = true;
+    setSyncStatus("checking");
+
+    getLiftLogSyncUser()
+      .then((user) => {
+        if (!active) {
+          return;
+        }
+
+        setSyncUserId(user?.id ?? "");
+        setSyncUserEmail(user?.email ?? "");
+        setSyncEmail((current) => current || user?.email || "");
+        setSyncStatus(user ? "syncing" : "local");
+      })
+      .catch((error) => {
+        if (!active) {
+          return;
+        }
+
+        setSyncStatus("error");
+        setSyncMessage(error instanceof Error ? error.message : "Could not connect cloud sync.");
+      });
+
+    const unsubscribe = subscribeToLiftLogAuth((user) => {
+      setSyncUserId(user?.id ?? "");
+      setSyncUserEmail(user?.email ?? "");
+      setSyncEmail((current) => current || user?.email || "");
+      setSyncStatus(user ? "syncing" : "local");
+      setSyncMessage(user ? "Cloud sync connected." : "");
+      didRunInitialSyncRef.current = false;
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+      if (pushTimerRef.current) {
+        window.clearTimeout(pushTimerRef.current);
+      }
+    };
+  }, [syncAvailable]);
+
+  useEffect(() => {
+    if (!syncAvailable || !hasHydrated || !syncUserId || didRunInitialSyncRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function bootstrapSync() {
+      try {
+        setSyncStatus("syncing");
+        const remoteStore = await readLiftLogCloudStore(syncUserId);
+        const mergedStore = remoteStore ? mergeLiftStores(storeRef.current, remoteStore) : replaceLiftStore(storeRef.current);
+        const mergedSignature = JSON.stringify(mergedStore);
+
+        if (cancelled) {
+          return;
+        }
+
+        didRunInitialSyncRef.current = true;
+        lastSyncedStoreRef.current = mergedSignature;
+
+        if (mergedSignature !== JSON.stringify(storeRef.current)) {
+          setStore(mergedStore);
+        }
+
+        await writeLiftLogCloudStore(syncUserId, mergedStore);
+
+        if (cancelled) {
+          return;
+        }
+
+        lastSyncedStoreRef.current = mergedSignature;
+        setSyncStatus("synced");
+        setSyncMessage(remoteStore ? "Cloud sync is live across your devices." : "First cloud backup saved.");
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        setSyncStatus("error");
+        setSyncMessage(error instanceof Error ? error.message : "Cloud sync hit a snag.");
+      }
+    }
+
+    bootstrapSync();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hasHydrated, syncAvailable, syncUserId]);
+
+  useEffect(() => {
+    if (!syncAvailable || !hasHydrated || !syncUserId || !didRunInitialSyncRef.current) {
+      return;
+    }
+
+    if (storeSignature === lastSyncedStoreRef.current) {
+      return;
+    }
+
+    if (pushTimerRef.current) {
+      window.clearTimeout(pushTimerRef.current);
+    }
+
+    setSyncStatus("syncing");
+    pushTimerRef.current = window.setTimeout(async () => {
+      try {
+        await writeLiftLogCloudStore(syncUserId, storeRef.current);
+        lastSyncedStoreRef.current = JSON.stringify(storeRef.current);
+        setSyncStatus("synced");
+      } catch (error) {
+        setSyncStatus("error");
+        setSyncMessage(error instanceof Error ? error.message : "Cloud sync hit a snag.");
+      }
+    }, 700);
+
+    return () => {
+      if (pushTimerRef.current) {
+        window.clearTimeout(pushTimerRef.current);
+      }
+    };
+  }, [hasHydrated, storeSignature, syncAvailable, syncUserId]);
 
   useEffect(() => {
     const preferredTheme =
@@ -361,6 +526,37 @@ export function LiftLogApp() {
       return result.store;
     });
     setNewExerciseName("");
+  }
+
+  async function handleSendMagicLink() {
+    const email = syncEmail.trim();
+
+    if (!email) {
+      return;
+    }
+
+    try {
+      setSyncBusy(true);
+      setSyncMessage("");
+      await sendLiftLogMagicLink(email);
+      setSyncMessage("Magic link sent. Open it on this device to connect sync.");
+    } catch (error) {
+      setSyncStatus("error");
+      setSyncMessage(error instanceof Error ? error.message : "Could not send magic link.");
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
+  async function handleSignOutSync() {
+    try {
+      setSyncBusy(true);
+      await signOutLiftLogSync();
+      setSyncStatus("local");
+      setSyncMessage("Cloud sync disconnected on this device.");
+    } finally {
+      setSyncBusy(false);
+    }
   }
 
   function handleRemoveExercise(workoutId: string, exerciseId: string) {
@@ -1370,7 +1566,7 @@ export function LiftLogApp() {
           </p>
             </div>
 
-            <div className="grid gap-3 sm:grid-cols-4 lg:min-w-[560px]">
+            <div className="grid gap-3 sm:grid-cols-2 lg:min-w-[640px] xl:grid-cols-5">
               <button
                 type="button"
                 onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
@@ -1412,6 +1608,47 @@ export function LiftLogApp() {
                 </p>
                 <p className="mt-2 text-xl font-semibold tracking-[-0.05em]">{store.logs.length}</p>
               </div>
+
+              <div className="rounded-[22px] border px-4 py-3" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                <div className="flex items-center justify-between gap-3">
+                  {syncAvailable ? <Cloud className="h-4 w-4" style={{ color: "var(--app-accent)" }} /> : <CloudOff className="h-4 w-4" style={{ color: "var(--app-text-muted)" }} />}
+                  <span
+                    className="rounded-full px-2 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.18em]"
+                    style={{
+                      background:
+                        syncStatus === "synced"
+                          ? "var(--app-accent-soft)"
+                          : syncStatus === "error"
+                            ? "rgba(190,50,50,0.08)"
+                            : "var(--app-panel-solid)",
+                      color: syncStatus === "error" ? "#c45151" : syncStatus === "synced" ? "var(--app-accent)" : "var(--app-text-soft)"
+                    }}
+                  >
+                    {syncStatus === "synced"
+                      ? "Synced"
+                      : syncStatus === "syncing"
+                        ? "Syncing"
+                        : syncStatus === "checking"
+                          ? "Checking"
+                          : syncStatus === "error"
+                            ? "Error"
+                            : "Local"}
+                  </span>
+                </div>
+                <p className="mt-2 text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                  Cloud Sync
+                </p>
+                <p className="mt-2 text-base font-semibold tracking-[-0.04em]">
+                  {syncUserEmail || (syncAvailable ? "Protect your logs" : "Needs keys")}
+                </p>
+                <p className="mt-2 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+                  {syncUserEmail
+                    ? "This device now shares templates and logs through Supabase."
+                    : syncAvailable
+                      ? "Connect email once and your logs stop feeling temporary."
+                      : "Add Supabase env vars to enable cloud backup."}
+                </p>
+              </div>
             </div>
           </div>
 
@@ -1432,6 +1669,73 @@ export function LiftLogApp() {
         </header>
 
         <div className="mt-4 flex flex-1 flex-col gap-4">
+          <section
+            className="rounded-[28px] border p-4 sm:p-5"
+            style={{ borderColor: "var(--app-border)", background: "var(--app-panel)", boxShadow: "var(--app-shadow)" }}
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="max-w-2xl">
+                <div className="flex items-center gap-2">
+                  {syncAvailable ? <Cloud className="h-4 w-4" style={{ color: "var(--app-accent)" }} /> : <CloudOff className="h-4 w-4" style={{ color: "var(--app-text-muted)" }} />}
+                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                    Backup & Sync
+                  </p>
+                </div>
+                <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em]">
+                  {syncUserEmail ? `Connected as ${syncUserEmail}` : "Keep your logs safe across devices."}
+                </h2>
+                <p className="mt-2 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+                  {syncAvailable
+                    ? "Lift Log stays fast on-device first, then quietly syncs to the cloud in the background."
+                    : "The sync layer is implemented. Add your Supabase keys and run the SQL migration to turn it on."}
+                </p>
+                {syncMessage ? (
+                  <p className="mt-3 text-sm leading-6" style={{ color: syncStatus === "error" ? "#c45151" : "var(--app-text-soft)" }}>
+                    {syncMessage}
+                  </p>
+                ) : null}
+              </div>
+
+              {syncAvailable ? (
+                syncUserEmail ? (
+                  <button
+                    type="button"
+                    onClick={handleSignOutSync}
+                    disabled={syncBusy}
+                    className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full border px-5 text-sm font-semibold"
+                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
+                  >
+                    {syncBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+                    Disconnect
+                  </button>
+                ) : (
+                  <div className="w-full max-w-md rounded-[24px] border p-3 sm:p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                    <div className="flex flex-col gap-3 sm:flex-row">
+                      <input
+                        type="email"
+                        value={syncEmail}
+                        onChange={(event) => setSyncEmail(event.target.value)}
+                        className="h-12 flex-1 rounded-[16px] border px-4 text-sm outline-none"
+                        style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                        placeholder="you@example.com"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendMagicLink}
+                        disabled={syncBusy || !syncEmail.trim()}
+                        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[16px] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed"
+                        style={{ background: "var(--app-accent)", boxShadow: "0 12px 30px var(--app-accent-glow)" }}
+                      >
+                        {syncBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+                        Send magic link
+                      </button>
+                    </div>
+                  </div>
+                )
+              ) : null}
+            </div>
+          </section>
+
           {view === "today" ? renderTodayView() : null}
           {view === "templates" ? renderTemplatesSection() : null}
           {view === "calendar" ? renderCalendarSection() : null}

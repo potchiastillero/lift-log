@@ -27,7 +27,8 @@ const DEFAULT_TEMPLATES = [
 ] as const;
 
 const EMPTY_STORE: LiftStore = {
-  version: 5,
+  version: 6,
+  updatedAt: new Date(0).toISOString(),
   exerciseLibrary: DEFAULT_TEMPLATES.flatMap((template) => template.exercises),
   templates: DEFAULT_TEMPLATES.map((template) => createTemplateRecord(template.name, template.exercises)),
   logs: []
@@ -134,6 +135,25 @@ function buildExerciseLibrary(templates: WorkoutTemplate[], logs: WorkoutLog[], 
   }
 
   return [...unique].sort((a, b) => a.localeCompare(b));
+}
+
+function getLatestEntityTimestamp(store: Pick<LiftStore, "templates" | "logs">) {
+  const timestamps = [
+    ...store.templates.flatMap((template) => [template.createdAt, template.updatedAt]),
+    ...store.logs.flatMap((log) => [log.startedAt, log.completedAt ?? "", ...log.exercises.flatMap((exercise) => exercise.sets.map((set) => set.completedAt))])
+  ].filter(Boolean);
+
+  return timestamps.sort((a, b) => b.localeCompare(a))[0] ?? new Date(0).toISOString();
+}
+
+function stampStore(store: Omit<LiftStore, "updatedAt" | "version">, updatedAt: string = new Date().toISOString()): LiftStore {
+  return {
+    version: 6,
+    updatedAt,
+    exerciseLibrary: store.exerciseLibrary,
+    templates: store.templates,
+    logs: store.logs
+  };
 }
 
 function createTemplateRecord(name: string, exercises: readonly string[], now: Date = new Date()): WorkoutTemplate {
@@ -331,7 +351,8 @@ function migrateLegacyStore(store: LegacyLiftStore): LiftStore {
   }
 
   return {
-    version: 5,
+    version: 6,
+    updatedAt: getLatestEntityTimestamp({ templates: EMPTY_STORE.templates, logs: migratedLogs }),
     exerciseLibrary: buildExerciseLibrary(EMPTY_STORE.templates, migratedLogs),
     templates: EMPTY_STORE.templates,
     logs: migratedLogs.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
@@ -361,7 +382,11 @@ export function readLiftStore(): LiftStore {
         : [];
 
       return {
-        version: 5,
+        version: 6,
+        updatedAt:
+          typeof parsed.updatedAt === "string" && parsed.updatedAt
+            ? parsed.updatedAt
+            : getLatestEntityTimestamp({ templates: templates.length > 0 ? templates : EMPTY_STORE.templates, logs }),
         exerciseLibrary: buildExerciseLibrary(templates.length > 0 ? templates : EMPTY_STORE.templates, logs, parsed.exerciseLibrary ?? []),
         templates: templates.length > 0 ? templates : EMPTY_STORE.templates,
         logs: logs.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
@@ -393,6 +418,19 @@ function persistStore(store: LiftStore) {
   return store;
 }
 
+export function replaceLiftStore(store: LiftStore) {
+  return persistStore({
+    ...store,
+    version: 6,
+    updatedAt: store.updatedAt || getLatestEntityTimestamp(store),
+    exerciseLibrary: buildExerciseLibrary(store.templates, store.logs, store.exerciseLibrary)
+  });
+}
+
+function persistStampedStore(store: Omit<LiftStore, "updatedAt" | "version">, now: Date = new Date()) {
+  return persistStore(stampStore(store, now.toISOString()));
+}
+
 export function upsertTemplate(store: LiftStore, input: { id?: string; name: string; exercises: string[] }, now: Date = new Date()) {
   const name = input.name.trim();
   const exercises = input.exercises.map((exercise) => sanitizeExerciseName(exercise)).filter(Boolean);
@@ -419,11 +457,11 @@ export function upsertTemplate(store: LiftStore, input: { id?: string; name: str
     ? store.templates.map((template) => (template.id === existing.id ? nextTemplate : template))
     : [nextTemplate, ...store.templates];
 
-  return persistStore({
+  return persistStampedStore({
     ...store,
     exerciseLibrary: buildExerciseLibrary(templates, store.logs, store.exerciseLibrary),
     templates
-  });
+  }, now);
 }
 
 export function startWorkout(store: LiftStore, templateId: string, now: Date = new Date()) {
@@ -449,17 +487,17 @@ export function startWorkout(store: LiftStore, templateId: string, now: Date = n
     }))
   };
 
-  const nextStore = persistStore({
+  const nextStore = persistStampedStore({
     ...store,
     exerciseLibrary: buildExerciseLibrary(store.templates, [...store.logs, workout], store.exerciseLibrary),
     logs: [...store.logs, workout]
-  });
+  }, now);
 
   return { store: nextStore, workout };
 }
 
 export function finishWorkout(store: LiftStore, workoutId: string, now: Date = new Date()) {
-  return persistStore({
+  return persistStampedStore({
     ...store,
     exerciseLibrary: buildExerciseLibrary(store.templates, store.logs, store.exerciseLibrary),
     logs: store.logs.map((log) =>
@@ -470,7 +508,7 @@ export function finishWorkout(store: LiftStore, workoutId: string, now: Date = n
           }
         : log
     )
-  });
+  }, now);
 }
 
 export function logWorkoutSet(
@@ -487,7 +525,7 @@ export function logWorkoutSet(
     completedAt: now.toISOString()
   };
 
-  return persistStore({
+  return persistStampedStore({
     ...store,
     exerciseLibrary: buildExerciseLibrary(store.templates, store.logs, store.exerciseLibrary),
     logs: store.logs.map((log) =>
@@ -505,11 +543,11 @@ export function logWorkoutSet(
           }
         : log
     )
-  });
+  }, now);
 }
 
 export function updateExerciseNote(store: LiftStore, workoutId: string, exerciseId: string, note: string) {
-  return persistStore({
+  return persistStampedStore({
     ...store,
     exerciseLibrary: buildExerciseLibrary(store.templates, store.logs, store.exerciseLibrary),
     logs: store.logs.map((log) =>
@@ -531,7 +569,7 @@ export function updateExerciseNote(store: LiftStore, workoutId: string, exercise
 }
 
 export function deleteWorkoutLog(store: LiftStore, workoutId: string) {
-  return persistStore({
+  return persistStampedStore({
     ...store,
     logs: store.logs.filter((log) => log.id !== workoutId),
     exerciseLibrary: buildExerciseLibrary(store.templates, store.logs.filter((log) => log.id !== workoutId), store.exerciseLibrary)
@@ -561,7 +599,7 @@ export function renameWorkoutExercise(store: LiftStore, workoutId: string, exerc
       : log
   );
 
-  return persistStore({
+  return persistStampedStore({
     ...store,
     logs,
     exerciseLibrary: buildExerciseLibrary(store.templates, logs, [...store.exerciseLibrary, sanitized])
@@ -595,7 +633,7 @@ export function addWorkoutExercise(store: LiftStore, workoutId: string, exercise
 
   return {
     exerciseId,
-    store: persistStore({
+    store: persistStampedStore({
       ...store,
       logs,
       exerciseLibrary: buildExerciseLibrary(store.templates, logs, [...store.exerciseLibrary, sanitized])
@@ -619,10 +657,111 @@ export function removeWorkoutExercise(store: LiftStore, workoutId: string, exerc
       : log
   );
 
-  return persistStore({
+  return persistStampedStore({
     ...store,
     logs,
     exerciseLibrary: buildExerciseLibrary(store.templates, logs, store.exerciseLibrary)
+  });
+}
+
+function mergeLoggedSets(localSets: LoggedSet[], remoteSets: LoggedSet[]) {
+  const byId = new Map<string, LoggedSet>();
+
+  for (const set of [...localSets, ...remoteSets]) {
+    const existing = byId.get(set.id);
+
+    if (!existing || set.completedAt > existing.completedAt) {
+      byId.set(set.id, set);
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+}
+
+function pickPreferredNote(localNote: string, remoteNote: string) {
+  if (!localNote) return remoteNote;
+  if (!remoteNote) return localNote;
+  return remoteNote.length >= localNote.length ? remoteNote : localNote;
+}
+
+function mergeWorkoutExercises(local: WorkoutExerciseLog[], remote: WorkoutExerciseLog[]) {
+  const byId = new Map<string, WorkoutExerciseLog>();
+
+  for (const exercise of local) {
+    byId.set(exercise.exerciseId, exercise);
+  }
+
+  for (const exercise of remote) {
+    const existing = byId.get(exercise.exerciseId);
+
+    if (!existing) {
+      byId.set(exercise.exerciseId, exercise);
+      continue;
+    }
+
+    byId.set(exercise.exerciseId, {
+      exerciseId: existing.exerciseId,
+      exerciseName: exercise.exerciseName || existing.exerciseName,
+      note: pickPreferredNote(existing.note, exercise.note),
+      sets: mergeLoggedSets(existing.sets, exercise.sets)
+    });
+  }
+
+  return [...byId.values()];
+}
+
+function mergeWorkoutLogs(local: WorkoutLog[], remote: WorkoutLog[]) {
+  const byId = new Map<string, WorkoutLog>();
+
+  for (const log of local) {
+    byId.set(log.id, log);
+  }
+
+  for (const log of remote) {
+    const existing = byId.get(log.id);
+
+    if (!existing) {
+      byId.set(log.id, log);
+      continue;
+    }
+
+    byId.set(log.id, {
+      ...existing,
+      templateName: log.templateName || existing.templateName,
+      startedAt: existing.startedAt < log.startedAt ? existing.startedAt : log.startedAt,
+      completedAt: [existing.completedAt, log.completedAt].filter(Boolean).sort().at(-1) ?? null,
+      exercises: mergeWorkoutExercises(existing.exercises, log.exercises)
+    });
+  }
+
+  return [...byId.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
+function mergeTemplates(local: WorkoutTemplate[], remote: WorkoutTemplate[]) {
+  const byId = new Map<string, WorkoutTemplate>();
+
+  for (const template of [...local, ...remote]) {
+    const existing = byId.get(template.id);
+
+    if (!existing || template.updatedAt > existing.updatedAt) {
+      byId.set(template.id, template);
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+export function mergeLiftStores(local: LiftStore, remote: LiftStore) {
+  const templates = mergeTemplates(local.templates, remote.templates);
+  const logs = mergeWorkoutLogs(local.logs, remote.logs);
+  const updatedAt = [local.updatedAt, remote.updatedAt].sort().at(-1) ?? new Date().toISOString();
+
+  return replaceLiftStore({
+    version: 6,
+    updatedAt,
+    exerciseLibrary: buildExerciseLibrary(templates, logs, [...local.exerciseLibrary, ...remote.exerciseLibrary]),
+    templates,
+    logs
   });
 }
 
