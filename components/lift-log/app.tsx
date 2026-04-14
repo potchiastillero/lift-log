@@ -582,18 +582,6 @@ export function LiftLogApp() {
     setSelectedExerciseId(fallbackExerciseId);
   }
 
-  function goToExercise(offset: number) {
-    if (!activeWorkout || selectedExerciseIndex < 0) {
-      return;
-    }
-
-    const target = activeWorkout.exercises[selectedExerciseIndex + offset];
-
-    if (target) {
-      setSelectedExerciseId(target.exerciseId);
-    }
-  }
-
   function openCalendar(date: string = today) {
     const parsed = new Date(`${date}T12:00:00`);
     setSelectedCalendarDate(date);
@@ -1152,6 +1140,69 @@ export function LiftLogApp() {
                         </div>
                       )}
                     </div>
+
+                    <div className="rounded-[24px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                      <div className="grid gap-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="block">
+                            <span className="text-[0.68rem] font-semibold uppercase tracking-[0.22em]" style={{ color: "var(--app-text-muted)" }}>
+                              Weight
+                            </span>
+                            <input
+                              inputMode="decimal"
+                              value={drafts[selectedExercise.exerciseId]?.weight ?? ""}
+                              onChange={(event) => updateDraft(selectedExercise.exerciseId, "weight", event.target.value)}
+                              className="mt-3 h-14 w-full rounded-[18px] border px-4 text-2xl font-semibold tracking-[-0.05em] outline-none"
+                              style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                              placeholder="0"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="text-[0.68rem] font-semibold uppercase tracking-[0.22em]" style={{ color: "var(--app-text-muted)" }}>
+                              Reps
+                            </span>
+                            <input
+                              inputMode="numeric"
+                              value={drafts[selectedExercise.exerciseId]?.reps ?? ""}
+                              onChange={(event) => updateDraft(selectedExercise.exerciseId, "reps", event.target.value)}
+                              className="mt-3 h-14 w-full rounded-[18px] border px-4 text-2xl font-semibold tracking-[-0.05em] outline-none"
+                              style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                              placeholder="8"
+                            />
+                          </label>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleLogSet(activeWorkout.id, selectedExercise.exerciseId)}
+                          disabled={
+                            !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.weight ?? "") ||
+                            !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.reps ?? "")
+                          }
+                          className="min-h-14 rounded-[20px] px-5 text-left text-white disabled:cursor-not-allowed"
+                          style={{
+                            background:
+                              !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.weight ?? "") ||
+                              !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.reps ?? "")
+                                ? "var(--app-text-muted)"
+                                : justLoggedExerciseId === selectedExercise.exerciseId
+                                  ? "linear-gradient(160deg, #20b15a, #169149)"
+                                  : "linear-gradient(160deg, var(--app-accent), var(--app-accent-strong))",
+                            boxShadow:
+                              justLoggedExerciseId === selectedExercise.exerciseId
+                                ? "0 16px 38px rgba(22,145,73,0.28)"
+                                : "0 16px 36px var(--app-accent-glow)"
+                          }}
+                        >
+                          <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em] text-white/70">
+                            {justLoggedExerciseId === selectedExercise.exerciseId ? "Saved" : "Quick log"}
+                          </span>
+                          <span className="mt-2 block text-2xl font-semibold tracking-[-0.05em]">
+                            {justLoggedExerciseId === selectedExercise.exerciseId ? "Logged" : "Log set"}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </section>
 
@@ -1415,91 +1466,6 @@ export function LiftLogApp() {
               </div>
             ) : null}
 
-            {selectedExercise ? (
-              <div
-                className="fixed inset-x-0 z-40 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]"
-                style={{ bottom: 0 }}
-              >
-                <div
-                  className="rounded-[30px] border p-3 shadow-[0_24px_70px_rgba(15,15,15,0.25)] backdrop-blur"
-                  style={{ borderColor: "var(--app-border)", background: "color-mix(in srgb, var(--app-panel) 92%, transparent)" }}
-                >
-                  <div className="flex items-center justify-between gap-2 px-1 pb-3">
-                    <button
-                      type="button"
-                      onClick={() => goToExercise(-1)}
-                      disabled={selectedExerciseIndex <= 0}
-                      className="inline-flex min-h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium disabled:opacity-40"
-                      style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      Prev
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setWorkoutSheet("queue")}
-                      className="inline-flex min-h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium"
-                      style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
-                    >
-                      Queue
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => goToExercise(1)}
-                      disabled={selectedExerciseIndex >= activeWorkout.exercises.length - 1}
-                      className="inline-flex min-h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium disabled:opacity-40"
-                      style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                    <input
-                      inputMode="decimal"
-                      value={drafts[selectedExercise.exerciseId]?.weight ?? ""}
-                      onChange={(event) => updateDraft(selectedExercise.exerciseId, "weight", event.target.value)}
-                      className="h-14 rounded-[18px] border px-4 text-2xl font-semibold tracking-[-0.05em] outline-none"
-                      style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
-                      placeholder="0"
-                    />
-                    <input
-                      inputMode="numeric"
-                      value={drafts[selectedExercise.exerciseId]?.reps ?? ""}
-                      onChange={(event) => updateDraft(selectedExercise.exerciseId, "reps", event.target.value)}
-                      className="h-14 rounded-[18px] border px-4 text-2xl font-semibold tracking-[-0.05em] outline-none"
-                      style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
-                      placeholder="8"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleLogSet(activeWorkout.id, selectedExercise.exerciseId)}
-                      disabled={
-                        !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.weight ?? "") ||
-                        !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.reps ?? "")
-                      }
-                      className="min-h-14 rounded-[18px] px-4 text-sm font-semibold text-white disabled:cursor-not-allowed"
-                      style={{
-                        background:
-                          !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.weight ?? "") ||
-                          !parsePositiveNumber(drafts[selectedExercise.exerciseId]?.reps ?? "")
-                            ? "var(--app-text-muted)"
-                            : justLoggedExerciseId === selectedExercise.exerciseId
-                              ? "linear-gradient(160deg, #20b15a, #169149)"
-                              : "linear-gradient(160deg, var(--app-accent), var(--app-accent-strong))",
-                        boxShadow:
-                          justLoggedExerciseId === selectedExercise.exerciseId
-                            ? "0 16px 38px rgba(22,145,73,0.28)"
-                            : "0 16px 36px var(--app-accent-glow)"
-                      }}
-                    >
-                      {justLoggedExerciseId === selectedExercise.exerciseId ? "Logged" : "Log set"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </section>
 
           <section className="hidden xl:grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_360px]">
