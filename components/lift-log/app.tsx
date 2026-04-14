@@ -23,7 +23,8 @@ import {
   Sparkles,
   Sun,
   TimerReset,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import {
   addWorkoutExercise,
@@ -71,6 +72,7 @@ type TemplateEditorState = {
 
 type AppView = "today" | "templates" | "calendar" | "logs";
 type SyncStatus = "local" | "checking" | "syncing" | "synced" | "error";
+type WorkoutSheet = "queue" | "exercise" | "notes" | "history" | null;
 
 const WEIGHT_STEPS = [-5, -2.5, 2.5, 5];
 const REP_STEPS = [-1, 1];
@@ -192,6 +194,7 @@ export function LiftLogApp() {
   const [syncMessage, setSyncMessage] = useState("");
   const [syncStatus, setSyncStatus] = useState<SyncStatus>("local");
   const [syncUserId, setSyncUserId] = useState("");
+  const [workoutSheet, setWorkoutSheet] = useState<WorkoutSheet>(null);
   const syncAvailable = isLiftLogSyncAvailable();
   const storeRef = useRef(store);
   const lastSyncedStoreRef = useRef("");
@@ -207,6 +210,7 @@ export function LiftLogApp() {
       ? activeWorkout.exercises.findIndex((exercise) => exercise.exerciseId === selectedExercise.exerciseId)
       : -1;
   const selectedHistory = selectedExercise ? getExerciseHistory(store, selectedExercise.exerciseName) : [];
+  const selectedPreviousReference = selectedExercise ? getPreviousExerciseReference(store, selectedExercise.exerciseName, activeWorkout?.id) : null;
   const workoutCompletion = activeWorkout ? getWorkoutCompletion(activeWorkout) : null;
   const recentLogs = useMemo(() => [...store.logs].sort((a, b) => b.startedAt.localeCompare(a.startedAt)), [store.logs]);
   const logsByDate = useMemo(() => {
@@ -387,6 +391,7 @@ export function LiftLogApp() {
       setDrafts({});
       setSelectedExerciseId("");
       setExerciseNameDrafts({});
+      setWorkoutSheet(null);
       return;
     }
 
@@ -1098,8 +1103,8 @@ export function LiftLogApp() {
                             Last reference
                           </p>
                           <p className="mt-2 text-base font-semibold">
-                            {getPreviousExerciseReference(store, selectedExercise.exerciseName, activeWorkout.id)
-                              ? `${formatWeight(getPreviousExerciseReference(store, selectedExercise.exerciseName, activeWorkout.id)!.latestSet.weight)} x ${getPreviousExerciseReference(store, selectedExercise.exerciseName, activeWorkout.id)!.latestSet.reps}`
+                            {selectedPreviousReference
+                              ? `${formatWeight(selectedPreviousReference.latestSet.weight)} x ${selectedPreviousReference.latestSet.reps}`
                               : "No prior log"}
                           </p>
                         </div>
@@ -1113,7 +1118,7 @@ export function LiftLogApp() {
                         </button>
                       </div>
                       <p className="mt-2 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
-                        {getPreviousExerciseReference(store, selectedExercise.exerciseName, activeWorkout.id)?.note || "No saved note yet for this lift."}
+                        {selectedPreviousReference?.note || "No saved note yet for this lift."}
                       </p>
                     </div>
 
@@ -1150,90 +1155,242 @@ export function LiftLogApp() {
                   </div>
                 </section>
 
-                <section className="space-y-3">
-                  <details
-                    className="rounded-[26px] border p-4"
-                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel)", boxShadow: "var(--app-shadow)" }}
+                <section className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setWorkoutSheet("queue")}
+                    className="rounded-[22px] border px-4 py-4 text-left"
+                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel)" }}
                   >
-                    <summary className="cursor-pointer list-none text-base font-semibold">Adjust this exercise</summary>
-                    <div className="mt-4 space-y-3">
-                      <label className="block rounded-[22px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
-                        <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
-                          Swap exercise
-                        </span>
-                        <input
-                          list="lift-log-exercise-library"
-                          value={exerciseNameDrafts[selectedExercise.exerciseId] ?? selectedExercise.exerciseName}
-                          onChange={(event) =>
-                            setExerciseNameDrafts((current) => ({
-                              ...current,
-                              [selectedExercise.exerciseId]: event.target.value
-                            }))
-                          }
-                          className="mt-3 h-14 w-full rounded-[18px] border px-4 text-base font-semibold outline-none"
-                          style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
-                          placeholder="Choose or type an exercise"
-                        />
-                      </label>
-                      <div className="grid grid-cols-2 gap-3">
+                    <p className="text-sm font-semibold">Queue</p>
+                    <p className="mt-1 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+                      Jump to any lift.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkoutSheet("exercise")}
+                    className="rounded-[22px] border px-4 py-4 text-left"
+                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel)" }}
+                  >
+                    <p className="text-sm font-semibold">Change</p>
+                    <p className="mt-1 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+                      Swap, add, or remove.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkoutSheet("notes")}
+                    className="rounded-[22px] border px-4 py-4 text-left"
+                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel)" }}
+                  >
+                    <p className="text-sm font-semibold">Notes</p>
+                    <p className="mt-1 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+                      Keep next-time cues.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setWorkoutSheet("history")}
+                    className="rounded-[22px] border px-4 py-4 text-left"
+                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel)" }}
+                  >
+                    <p className="text-sm font-semibold">History</p>
+                    <p className="mt-1 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+                      Quick progression view.
+                    </p>
+                  </button>
+                </section>
+              </>
+            ) : null}
+
+            {selectedExercise && workoutSheet ? (
+              <div className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" onClick={() => setWorkoutSheet(null)}>
+                <div className="flex min-h-full items-end justify-center p-4">
+                  <section
+                    className="w-full max-w-xl rounded-[30px] border p-4"
+                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", boxShadow: "0 30px 120px rgba(15,15,15,0.28)" }}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                          {workoutSheet === "queue" ? "Workout queue" : workoutSheet === "exercise" ? "Exercise setup" : workoutSheet === "notes" ? "Notes" : "History"}
+                        </p>
+                        <h3 className="mt-2 text-2xl font-semibold tracking-[-0.05em]">
+                          {workoutSheet === "queue"
+                            ? "Jump through the workout."
+                            : workoutSheet === "exercise"
+                              ? "Change the current lift."
+                              : workoutSheet === "notes"
+                                ? selectedExercise.exerciseName
+                                : `${selectedExercise.exerciseName} progression`}
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setWorkoutSheet(null)}
+                        className="inline-flex h-11 w-11 items-center justify-center rounded-full border"
+                        style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {workoutSheet === "queue" ? (
+                      <div className="mt-4 space-y-3">
+                        {activeWorkout.exercises.map((exercise, index) => {
+                          const isCurrent = exercise.exerciseId === selectedExercise.exerciseId;
+
+                          return (
+                            <button
+                              key={exercise.exerciseId}
+                              type="button"
+                              onClick={() => {
+                                setSelectedExerciseId(exercise.exerciseId);
+                                setWorkoutSheet(null);
+                              }}
+                              className="w-full rounded-[22px] border p-4 text-left"
+                              style={{
+                                borderColor: isCurrent ? "var(--app-accent)" : "var(--app-border)",
+                                background: isCurrent ? "var(--app-accent-soft)" : "var(--app-panel-muted)"
+                              }}
+                            >
+                              <p className="text-sm font-semibold">
+                                {index + 1}. {exercise.exerciseName}
+                              </p>
+                              <p className="mt-1 text-sm" style={{ color: "var(--app-text-soft)" }}>
+                                {exercise.sets.length > 0 ? `${exercise.sets.length} set${exercise.sets.length === 1 ? "" : "s"} logged` : "No sets yet"}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    {workoutSheet === "exercise" ? (
+                      <div className="mt-4 space-y-4">
+                        <label className="block rounded-[22px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                          <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                            Swap exercise
+                          </span>
+                          <input
+                            list="lift-log-exercise-library"
+                            value={exerciseNameDrafts[selectedExercise.exerciseId] ?? selectedExercise.exerciseName}
+                            onChange={(event) =>
+                              setExerciseNameDrafts((current) => ({
+                                ...current,
+                                [selectedExercise.exerciseId]: event.target.value
+                              }))
+                            }
+                            className="mt-3 h-14 w-full rounded-[18px] border px-4 text-base font-semibold outline-none"
+                            style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                            placeholder="Choose or type an exercise"
+                          />
+                        </label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleRenameExercise(activeWorkout.id, selectedExercise.exerciseId);
+                              setWorkoutSheet(null);
+                            }}
+                            className="min-h-12 rounded-[18px] border px-4 text-sm font-semibold"
+                            style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
+                          >
+                            Update exercise
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleRemoveExercise(activeWorkout.id, selectedExercise.exerciseId);
+                              setWorkoutSheet(null);
+                            }}
+                            disabled={activeWorkout.exercises.length <= 1}
+                            className="min-h-12 rounded-[18px] border px-4 text-sm font-semibold"
+                            style={{
+                              borderColor: activeWorkout.exercises.length <= 1 ? "var(--app-border)" : "rgba(190,50,50,0.22)",
+                              background: activeWorkout.exercises.length <= 1 ? "var(--app-panel-muted)" : "rgba(190,50,50,0.08)",
+                              color: activeWorkout.exercises.length <= 1 ? "var(--app-text-muted)" : "#c45151"
+                            }}
+                          >
+                            {activeWorkout.exercises.length <= 1 ? "Keep one exercise" : "Remove exercise"}
+                          </button>
+                        </div>
+                        <label className="block rounded-[22px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                          <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                            Add exercise to queue
+                          </span>
+                          <input
+                            list="lift-log-exercise-library"
+                            value={newExerciseName}
+                            onChange={(event) => setNewExerciseName(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                handleAddExercise(activeWorkout.id);
+                                setWorkoutSheet(null);
+                              }
+                            }}
+                            className="mt-3 h-14 w-full rounded-[18px] border px-4 text-base font-medium outline-none"
+                            style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                            placeholder="Search the library or type a new exercise"
+                          />
+                        </label>
                         <button
                           type="button"
-                          onClick={() => handleRenameExercise(activeWorkout.id, selectedExercise.exerciseId)}
-                          className="min-h-12 rounded-[18px] border px-4 text-sm font-semibold"
-                          style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text-soft)" }}
-                        >
-                          Update exercise
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveExercise(activeWorkout.id, selectedExercise.exerciseId)}
-                          disabled={activeWorkout.exercises.length <= 1}
-                          className="min-h-12 rounded-[18px] border px-4 text-sm font-semibold"
-                          style={{
-                            borderColor: activeWorkout.exercises.length <= 1 ? "var(--app-border)" : "rgba(190,50,50,0.22)",
-                            background: activeWorkout.exercises.length <= 1 ? "var(--app-panel-solid)" : "rgba(190,50,50,0.08)",
-                            color: activeWorkout.exercises.length <= 1 ? "var(--app-text-muted)" : "#c45151"
+                          onClick={() => {
+                            handleAddExercise(activeWorkout.id);
+                            setWorkoutSheet(null);
                           }}
+                          className="min-h-12 w-full rounded-[18px] px-4 text-sm font-semibold text-white"
+                          style={{ background: "var(--app-accent)", boxShadow: "0 12px 30px var(--app-accent-glow)" }}
                         >
-                          {activeWorkout.exercises.length <= 1 ? "Keep one exercise" : "Remove exercise"}
+                          Add exercise
                         </button>
                       </div>
-                    </div>
-                  </details>
+                    ) : null}
 
-                  <details
-                    className="rounded-[26px] border p-4"
-                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel)", boxShadow: "var(--app-shadow)" }}
-                  >
-                    <summary className="cursor-pointer list-none text-base font-semibold">Notes and history</summary>
-                    <div className="mt-4 space-y-3">
-                      <label className="block rounded-[22px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
-                        <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
-                          Note for next time
-                        </span>
-                        <textarea
-                          value={selectedExercise.note}
-                          onChange={(event) =>
-                            setStore((current) => updateExerciseNote(current, activeWorkout.id, selectedExercise.exerciseId, event.target.value))
-                          }
-                          className="mt-3 min-h-28 w-full resize-none rounded-[18px] border px-4 py-3 text-sm leading-6 outline-none"
-                          style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
-                          placeholder="Grip felt better slightly wider. Rest 90 seconds. Left shoulder needed more warmup."
-                        />
-                      </label>
+                    {workoutSheet === "notes" ? (
+                      <div className="mt-4 space-y-4">
+                        <div className="rounded-[22px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                          <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                            Last note
+                          </p>
+                          <p className="mt-3 text-sm leading-6" style={{ color: "var(--app-text-soft)" }}>
+                            {selectedPreviousReference?.note || "No saved note yet for this lift."}
+                          </p>
+                        </div>
+                        <label className="block rounded-[22px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                          <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                            Note for next time
+                          </span>
+                          <textarea
+                            value={selectedExercise.note}
+                            onChange={(event) =>
+                              setStore((current) => updateExerciseNote(current, activeWorkout.id, selectedExercise.exerciseId, event.target.value))
+                            }
+                            className="mt-3 min-h-32 w-full resize-none rounded-[18px] border px-4 py-3 text-sm leading-6 outline-none"
+                            style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                            placeholder="Grip felt better slightly wider. Rest 90 seconds. Left shoulder needed more warmup."
+                          />
+                        </label>
+                      </div>
+                    ) : null}
 
-                      {selectedHistory.length > 0 ? (
-                        <div className="space-y-3">
-                          {selectedHistory.slice(0, 3).map((item) => (
+                    {workoutSheet === "history" ? (
+                      <div className="mt-4 space-y-3">
+                        {selectedHistory.length > 0 ? (
+                          selectedHistory.map((item) => (
                             <article
                               key={item.workoutId}
-                              className="rounded-[20px] border p-4"
+                              className="rounded-[22px] border p-4"
                               style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}
                             >
                               <div className="flex items-center justify-between gap-3">
                                 <div>
                                   <p className="text-sm font-semibold">{formatWorkoutDateLabel(item.date, today)}</p>
-                                  <p className="text-xs uppercase tracking-[0.18em]" style={{ color: "var(--app-text-muted)" }}>
+                                  <p className="mt-1 text-xs uppercase tracking-[0.18em]" style={{ color: "var(--app-text-muted)" }}>
                                     {item.templateName}
                                   </p>
                                 </div>
@@ -1242,56 +1399,20 @@ export function LiftLogApp() {
                                 </span>
                               </div>
                             </article>
-                          ))}
-                        </div>
-                      ) : (
-                        <div
-                          className="rounded-[20px] border border-dashed px-4 py-4 text-sm leading-6"
-                          style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
-                        >
-                          History appears here automatically once you log this lift.
-                        </div>
-                      )}
-                    </div>
-                  </details>
-
-                  <details
-                    className="rounded-[26px] border p-4"
-                    style={{ borderColor: "var(--app-border)", background: "var(--app-panel)", boxShadow: "var(--app-shadow)" }}
-                  >
-                    <summary className="cursor-pointer list-none text-base font-semibold">Workout queue</summary>
-                    <div className="mt-4 space-y-3">
-                      <label className="block rounded-[22px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
-                        <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
-                          Add exercise mid-workout
-                        </span>
-                        <input
-                          list="lift-log-exercise-library"
-                          value={newExerciseName}
-                          onChange={(event) => setNewExerciseName(event.target.value)}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              handleAddExercise(activeWorkout.id);
-                            }
-                          }}
-                          className="mt-3 h-14 w-full rounded-[18px] border px-4 text-base font-medium outline-none"
-                          style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
-                          placeholder="Search the library or type a new exercise"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => handleAddExercise(activeWorkout.id)}
-                        className="min-h-12 w-full rounded-[18px] px-4 text-sm font-semibold text-white"
-                        style={{ background: "var(--app-accent)", boxShadow: "0 12px 30px var(--app-accent-glow)" }}
-                      >
-                        Add exercise
-                      </button>
-                    </div>
-                  </details>
-                </section>
-              </>
+                          ))
+                        ) : (
+                          <div
+                            className="rounded-[22px] border border-dashed px-4 py-5 text-sm leading-6"
+                            style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
+                          >
+                            History appears here automatically once you log this lift.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </section>
+                </div>
+              </div>
             ) : null}
 
             {selectedExercise ? (
@@ -1314,9 +1435,14 @@ export function LiftLogApp() {
                       <ChevronLeft className="h-4 w-4" />
                       Prev
                     </button>
-                    <p className="text-sm font-medium" style={{ color: "var(--app-text-soft)" }}>
-                      {selectedExercise.exerciseName}
-                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setWorkoutSheet("queue")}
+                      className="inline-flex min-h-10 items-center gap-2 rounded-full border px-3 text-sm font-medium"
+                      style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)", color: "var(--app-text-soft)" }}
+                    >
+                      Queue
+                    </button>
                     <button
                       type="button"
                       onClick={() => goToExercise(1)}
@@ -1370,21 +1496,6 @@ export function LiftLogApp() {
                     >
                       {justLoggedExerciseId === selectedExercise.exerciseId ? "Logged" : "Log set"}
                     </button>
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-4 gap-2">
-                    {WEIGHT_STEPS.map((step) => (
-                      <button
-                        key={`mobile-weight-${step}`}
-                        type="button"
-                        onClick={() => adjustDraft(selectedExercise.exerciseId, "weight", step)}
-                        className="min-h-10 rounded-[14px] border text-sm font-semibold"
-                        style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)" }}
-                      >
-                        {step > 0 ? "+" : ""}
-                        {step}
-                      </button>
-                    ))}
                   </div>
                 </div>
               </div>
