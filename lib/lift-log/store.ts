@@ -27,7 +27,8 @@ const DEFAULT_TEMPLATES = [
 ] as const;
 
 const EMPTY_STORE: LiftStore = {
-  version: 4,
+  version: 5,
+  exerciseLibrary: DEFAULT_TEMPLATES.flatMap((template) => template.exercises),
   templates: DEFAULT_TEMPLATES.map((template) => createTemplateRecord(template.name, template.exercises)),
   logs: []
 };
@@ -108,6 +109,31 @@ export function formatDuration(startedAt: string, now: Date = new Date()) {
 
 export function sanitizeExerciseName(value: string) {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function buildExerciseLibrary(templates: WorkoutTemplate[], logs: WorkoutLog[], existing: string[] = []) {
+  const unique = new Set<string>();
+
+  for (const name of existing) {
+    const sanitized = sanitizeExerciseName(name);
+    if (sanitized) {
+      unique.add(sanitized);
+    }
+  }
+
+  for (const template of templates) {
+    for (const exercise of template.exercises) {
+      unique.add(sanitizeExerciseName(exercise.name));
+    }
+  }
+
+  for (const log of logs) {
+    for (const exercise of log.exercises) {
+      unique.add(sanitizeExerciseName(exercise.exerciseName));
+    }
+  }
+
+  return [...unique].sort((a, b) => a.localeCompare(b));
 }
 
 function createTemplateRecord(name: string, exercises: readonly string[], now: Date = new Date()): WorkoutTemplate {
@@ -305,7 +331,8 @@ function migrateLegacyStore(store: LegacyLiftStore): LiftStore {
   }
 
   return {
-    version: 4,
+    version: 5,
+    exerciseLibrary: buildExerciseLibrary(EMPTY_STORE.templates, migratedLogs),
     templates: EMPTY_STORE.templates,
     logs: migratedLogs.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
   };
@@ -334,7 +361,8 @@ export function readLiftStore(): LiftStore {
         : [];
 
       return {
-        version: 4,
+        version: 5,
+        exerciseLibrary: buildExerciseLibrary(templates.length > 0 ? templates : EMPTY_STORE.templates, logs, parsed.exerciseLibrary ?? []),
         templates: templates.length > 0 ? templates : EMPTY_STORE.templates,
         logs: logs.sort((a, b) => a.startedAt.localeCompare(b.startedAt))
       };
@@ -393,6 +421,7 @@ export function upsertTemplate(store: LiftStore, input: { id?: string; name: str
 
   return persistStore({
     ...store,
+    exerciseLibrary: buildExerciseLibrary(templates, store.logs, store.exerciseLibrary),
     templates
   });
 }
@@ -422,6 +451,7 @@ export function startWorkout(store: LiftStore, templateId: string, now: Date = n
 
   const nextStore = persistStore({
     ...store,
+    exerciseLibrary: buildExerciseLibrary(store.templates, [...store.logs, workout], store.exerciseLibrary),
     logs: [...store.logs, workout]
   });
 
@@ -431,6 +461,7 @@ export function startWorkout(store: LiftStore, templateId: string, now: Date = n
 export function finishWorkout(store: LiftStore, workoutId: string, now: Date = new Date()) {
   return persistStore({
     ...store,
+    exerciseLibrary: buildExerciseLibrary(store.templates, store.logs, store.exerciseLibrary),
     logs: store.logs.map((log) =>
       log.id === workoutId
         ? {
@@ -458,6 +489,7 @@ export function logWorkoutSet(
 
   return persistStore({
     ...store,
+    exerciseLibrary: buildExerciseLibrary(store.templates, store.logs, store.exerciseLibrary),
     logs: store.logs.map((log) =>
       log.id === workoutId
         ? {
@@ -479,6 +511,7 @@ export function logWorkoutSet(
 export function updateExerciseNote(store: LiftStore, workoutId: string, exerciseId: string, note: string) {
   return persistStore({
     ...store,
+    exerciseLibrary: buildExerciseLibrary(store.templates, store.logs, store.exerciseLibrary),
     logs: store.logs.map((log) =>
       log.id === workoutId
         ? {
@@ -500,7 +533,96 @@ export function updateExerciseNote(store: LiftStore, workoutId: string, exercise
 export function deleteWorkoutLog(store: LiftStore, workoutId: string) {
   return persistStore({
     ...store,
-    logs: store.logs.filter((log) => log.id !== workoutId)
+    logs: store.logs.filter((log) => log.id !== workoutId),
+    exerciseLibrary: buildExerciseLibrary(store.templates, store.logs.filter((log) => log.id !== workoutId), store.exerciseLibrary)
+  });
+}
+
+export function renameWorkoutExercise(store: LiftStore, workoutId: string, exerciseId: string, exerciseName: string) {
+  const sanitized = sanitizeExerciseName(exerciseName);
+
+  if (!sanitized) {
+    return store;
+  }
+
+  const logs = store.logs.map((log) =>
+    log.id === workoutId
+      ? {
+          ...log,
+          exercises: log.exercises.map((exercise) =>
+            exercise.exerciseId === exerciseId
+              ? {
+                  ...exercise,
+                  exerciseName: sanitized
+                }
+              : exercise
+          )
+        }
+      : log
+  );
+
+  return persistStore({
+    ...store,
+    logs,
+    exerciseLibrary: buildExerciseLibrary(store.templates, logs, [...store.exerciseLibrary, sanitized])
+  });
+}
+
+export function addWorkoutExercise(store: LiftStore, workoutId: string, exerciseName: string) {
+  const sanitized = sanitizeExerciseName(exerciseName);
+
+  if (!sanitized) {
+    return { store, exerciseId: "" };
+  }
+
+  const exerciseId = createId("exercise");
+  const logs = store.logs.map((log) =>
+    log.id === workoutId
+      ? {
+          ...log,
+          exercises: [
+            ...log.exercises,
+            {
+              exerciseId,
+              exerciseName: sanitized,
+              note: "",
+              sets: []
+            }
+          ]
+        }
+      : log
+  );
+
+  return {
+    exerciseId,
+    store: persistStore({
+      ...store,
+      logs,
+      exerciseLibrary: buildExerciseLibrary(store.templates, logs, [...store.exerciseLibrary, sanitized])
+    })
+  };
+}
+
+export function removeWorkoutExercise(store: LiftStore, workoutId: string, exerciseId: string) {
+  const targetWorkout = store.logs.find((log) => log.id === workoutId);
+
+  if (!targetWorkout || targetWorkout.exercises.length <= 1) {
+    return store;
+  }
+
+  const logs = store.logs.map((log) =>
+    log.id === workoutId
+      ? {
+          ...log,
+          exercises: log.exercises.filter((exercise) => exercise.exerciseId !== exerciseId)
+        }
+      : log
+  );
+
+  return persistStore({
+    ...store,
+    logs,
+    exerciseLibrary: buildExerciseLibrary(store.templates, logs, store.exerciseLibrary)
   });
 }
 

@@ -21,6 +21,7 @@ import {
   Trash2
 } from "lucide-react";
 import {
+  addWorkoutExercise,
   deleteWorkoutLog,
   finishWorkout,
   formatDisplayDate,
@@ -33,6 +34,8 @@ import {
   getWorkoutCompletion,
   logWorkoutSet,
   readLiftStore,
+  removeWorkoutExercise,
+  renameWorkoutExercise,
   startWorkout,
   updateExerciseNote,
   upsertTemplate
@@ -150,7 +153,7 @@ function ViewButton({
 }
 
 export function LiftLogApp() {
-  const [store, setStore] = useState<LiftStore>({ version: 4, templates: [], logs: [] });
+  const [store, setStore] = useState<LiftStore>({ version: 5, exerciseLibrary: [], templates: [], logs: [] });
   const [drafts, setDrafts] = useState<Record<string, DraftSet>>({});
   const [selectedExerciseId, setSelectedExerciseId] = useState("");
   const [templateEditor, setTemplateEditor] = useState<TemplateEditorState | null>(null);
@@ -163,6 +166,8 @@ export function LiftLogApp() {
     return new Date(date.getFullYear(), date.getMonth(), 1);
   });
   const [justLoggedExerciseId, setJustLoggedExerciseId] = useState("");
+  const [exerciseNameDrafts, setExerciseNameDrafts] = useState<Record<string, string>>({});
+  const [newExerciseName, setNewExerciseName] = useState("");
 
   const today = formatTodayDate(now);
   const activeWorkout = getActiveWorkout(store, today);
@@ -212,6 +217,7 @@ export function LiftLogApp() {
     if (!activeWorkout) {
       setDrafts({});
       setSelectedExerciseId("");
+      setExerciseNameDrafts({});
       return;
     }
 
@@ -228,6 +234,16 @@ export function LiftLogApp() {
 
       for (const exercise of activeWorkout.exercises) {
         next[exercise.exerciseId] = current[exercise.exerciseId] ?? getInitialDraft(store, activeWorkout, exercise.exerciseId);
+      }
+
+      return next;
+    });
+
+    setExerciseNameDrafts((current) => {
+      const next: Record<string, string> = {};
+
+      for (const exercise of activeWorkout.exercises) {
+        next[exercise.exerciseId] = current[exercise.exerciseId] ?? exercise.exerciseName;
       }
 
       return next;
@@ -318,6 +334,47 @@ export function LiftLogApp() {
 
   function handleDeleteLog(workoutId: string) {
     setStore((current) => deleteWorkoutLog(current, workoutId));
+  }
+
+  function handleRenameExercise(workoutId: string, exerciseId: string) {
+    const nextName = exerciseNameDrafts[exerciseId]?.trim();
+
+    if (!nextName) {
+      return;
+    }
+
+    setStore((current) => renameWorkoutExercise(current, workoutId, exerciseId, nextName));
+  }
+
+  function handleAddExercise(workoutId: string) {
+    const nextName = newExerciseName.trim();
+
+    if (!nextName) {
+      return;
+    }
+
+    setStore((current) => {
+      const result = addWorkoutExercise(current, workoutId, nextName);
+      if (result.exerciseId) {
+        setSelectedExerciseId(result.exerciseId);
+      }
+      return result.store;
+    });
+    setNewExerciseName("");
+  }
+
+  function handleRemoveExercise(workoutId: string, exerciseId: string) {
+    const workout = store.logs.find((log) => log.id === workoutId);
+
+    if (!workout || workout.exercises.length <= 1) {
+      return;
+    }
+
+    const exerciseIndex = workout.exercises.findIndex((exercise) => exercise.exerciseId === exerciseId);
+    const fallbackExerciseId = workout.exercises[exerciseIndex + 1]?.exerciseId ?? workout.exercises[exerciseIndex - 1]?.exerciseId ?? "";
+
+    setStore((current) => removeWorkoutExercise(current, workoutId, exerciseId));
+    setSelectedExerciseId(fallbackExerciseId);
   }
 
   function openCalendar(date: string = today) {
@@ -789,6 +846,7 @@ export function LiftLogApp() {
                 const previousReference = getPreviousExerciseReference(store, exercise.exerciseName, activeWorkout.id);
                 const isExpanded = selectedExerciseId === exercise.exerciseId;
                 const isJustLogged = justLoggedExerciseId === exercise.exerciseId;
+                const exerciseNameDraft = exerciseNameDrafts[exercise.exerciseId] ?? exercise.exerciseName;
 
                 return (
                   <article
@@ -885,6 +943,62 @@ export function LiftLogApp() {
                       </div>
                     ) : (
                       <>
+                        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto_auto]">
+                          <label className="rounded-[24px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
+                            <span className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                              Exercise
+                            </span>
+                            <input
+                              list="lift-log-exercise-library"
+                              value={exerciseNameDraft}
+                              onChange={(event) =>
+                                setExerciseNameDrafts((current) => ({
+                                  ...current,
+                                  [exercise.exerciseId]: event.target.value
+                                }))
+                              }
+                              onBlur={() => handleRenameExercise(activeWorkout.id, exercise.exerciseId)}
+                              className="mt-3 h-14 w-full rounded-[18px] border px-4 text-[1.05rem] font-semibold outline-none"
+                              style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                              placeholder="Choose or type an exercise"
+                            />
+                          </label>
+
+                          <div
+                            className="flex min-h-[104px] flex-col justify-between rounded-[24px] border px-5 py-4"
+                            style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text-soft)" }}
+                          >
+                            <div>
+                              <p className="text-[0.68rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                                Swap
+                              </p>
+                              <p className="mt-2 text-sm leading-6">Pick from the library or type a variation on the fly.</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRenameExercise(activeWorkout.id, exercise.exerciseId)}
+                              className="mt-3 inline-flex min-h-11 items-center justify-center rounded-[16px] border px-4 text-sm font-semibold"
+                              style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}
+                            >
+                              Update exercise
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExercise(activeWorkout.id, exercise.exerciseId)}
+                            disabled={activeWorkout.exercises.length <= 1}
+                            className="min-h-[104px] rounded-[24px] border px-5 text-sm font-semibold"
+                            style={{
+                              borderColor: activeWorkout.exercises.length <= 1 ? "var(--app-border)" : "rgba(190,50,50,0.22)",
+                              background: activeWorkout.exercises.length <= 1 ? "var(--app-panel-solid)" : "rgba(190,50,50,0.08)",
+                              color: activeWorkout.exercises.length <= 1 ? "var(--app-text-muted)" : "#c45151"
+                            }}
+                          >
+                            {activeWorkout.exercises.length <= 1 ? "Keep one exercise" : "Remove exercise"}
+                          </button>
+                        </div>
+
                         <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_auto]">
                           <div className="rounded-[24px] border p-4" style={{ borderColor: "var(--app-border)", background: "var(--app-panel-muted)" }}>
                             <div className="flex items-center justify-between">
@@ -1048,6 +1162,45 @@ export function LiftLogApp() {
                 );
               })}
             </div>
+
+            <section
+              className="rounded-[30px] border p-4 sm:p-5"
+              style={{ borderColor: "var(--app-border)", background: "var(--app-panel)", boxShadow: "var(--app-shadow)" }}
+            >
+              <div className="flex items-center gap-2">
+                <Plus className="h-4 w-4" style={{ color: "var(--app-accent)" }} />
+                <p className="text-[0.76rem] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--app-text-muted)" }}>
+                  Add Exercise Mid-Workout
+                </p>
+              </div>
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+                <input
+                  list="lift-log-exercise-library"
+                  value={newExerciseName}
+                  onChange={(event) => setNewExerciseName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      handleAddExercise(activeWorkout.id);
+                    }
+                  }}
+                  className="h-14 w-full rounded-[18px] border px-4 text-[1.02rem] font-medium outline-none"
+                  style={{ borderColor: "var(--app-border)", background: "var(--app-panel-solid)", color: "var(--app-text)" }}
+                  placeholder="Search the library or type a new exercise"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleAddExercise(activeWorkout.id)}
+                  className="min-h-14 rounded-[18px] px-5 text-sm font-semibold text-white"
+                  style={{ background: "var(--app-accent)", boxShadow: "0 12px 30px var(--app-accent-glow)" }}
+                >
+                  Add exercise
+                </button>
+              </div>
+              <p className="mt-3 text-[0.95rem] leading-7 sm:text-sm sm:leading-6" style={{ color: "var(--app-text-soft)" }}>
+                Use this if a machine is taken, you change variations on the fly, or you want to slot in a bonus movement without rebuilding the template.
+              </p>
+            </section>
           </div>
 
           <aside className="space-y-4">
@@ -1286,6 +1439,12 @@ export function LiftLogApp() {
             ? renderLogsSection(recentLogs, "Your recent sessions are right here.", "Review what you did, skim saved notes, and delete old sessions you do not want to keep.")
             : null}
         </div>
+
+        <datalist id="lift-log-exercise-library">
+          {store.exerciseLibrary.map((exerciseName) => (
+            <option key={exerciseName} value={exerciseName} />
+          ))}
+        </datalist>
 
         {templateEditor ? (
           <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 p-4 backdrop-blur-sm sm:items-center">
